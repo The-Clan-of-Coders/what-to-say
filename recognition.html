@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Speech Sample</title>
+    <meta charset="utf-8" />
+    <script type="text/javascript" src="./difflib-browser.js"></script>
+</head>
+
+<body style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:13px;">
+
+    <div id="content" style="display:none">
+        <table>
+            <tr>
+                <td align="right"><b></b></td>
+                <td>
+                    <button id="scenarioStartButton">Start</button>
+                    <button id="scenarioStopButton" disabled="disabled">Stop</button>
+                </td>
+            </tr>
+            <tr>
+                <td align="right">Results:</td>
+                <td align="left">
+                    <textarea id="phraseDiv" style="display: inline-block;width:500px;height:200px"></textarea>
+                </td>
+            </tr>
+            <tr>
+                <td align="right">Events:</td>
+                <td align="left">
+                    <textarea id="statusDiv"
+                        style="display: inline-block;width:500px;height:200px;overflow: scroll;white-space: nowrap;">
+                    </textarea>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- Speech SDK REFERENCE -->
+    <script src="https://aka.ms/csspeech/jsbrowserpackageraw"></script>
+
+    <script>
+
+        // An authorization token is a more secure method to authenticate for a browser deployment as
+        // it allows the subscription keys to be kept secure on a server and a 10 minute use token to be
+        // handed out to clients from an endpoint that can be protected from unauthorized access.
+        let authorizationEndpoint = "http://files.lauren-mccarthy.com/what-say/token.php";
+        let authorizationToken, authorizationRegion;
+
+        function RequestAuthorizationToken() {
+            if (authorizationEndpoint) {
+                let a = new XMLHttpRequest();
+                a.open("GET", authorizationEndpoint);
+                a.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+                a.send("");
+                a.onload = function () {
+                    let token = JSON.parse(atob(this.responseText.split(".")[1]));
+                    authorizationRegion = token.region;
+                    authorizationToken = this.responseText;
+                    console.log("Got an authorization token: " + token);
+                }
+            }
+        }
+    </script>
+
+    <script>
+        // On document load resolve the Speech SDK dependency
+        function Initialize(onComplete) {
+            if (!!window.SpeechSDK) {
+                document.getElementById('content').style.display = 'block';
+                onComplete(window.SpeechSDK);
+            }
+        }
+    </script>
+
+    <!-- Browser Hooks -->
+    <script>
+        let SpeechSDK;
+        let phraseDiv, statusDiv;
+        let recognizer;
+        let scenarioStartButton, scenarioStopButton;
+        let reco;
+
+        let soundContext = undefined;
+        try {
+            let AudioContext = window.AudioContext // our preferred impl
+                || window.webkitAudioContext       // fallback, mostly when on Safari
+                || false;                          // could not find.
+
+            if (AudioContext) {
+                soundContext = new AudioContext();
+            } else {
+                alert("Audio context not supported");
+            }
+        } catch (e) {
+            window.console.log("no sound context found, no audio output. " + e);
+        }
+
+        function resetUiForScenarioStart() {
+            phraseDiv.innerHTML = "";
+            statusDiv.innerHTML = "";
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            scenarioStartButton = document.getElementById('scenarioStartButton');
+            scenarioStopButton = document.getElementById('scenarioStopButton');
+
+            phraseDiv = document.getElementById("phraseDiv");
+            statusDiv = document.getElementById("statusDiv");
+
+            scenarioStartButton.addEventListener("click", doRecognizeOnceAsync);
+
+            scenarioStopButton.addEventListener("click", function() {
+                reco.close();
+                reco = undefined;
+            });
+
+            Initialize(function (speechSdk) {
+                SpeechSDK = speechSdk;
+                    RequestAuthorizationToken();
+            });
+        });
+    </script>
+
+    <!-- Configuration and setup common to SDK objects, including events -->
+    <script>
+
+
+        function onRecognizing(sender, recognitionEventArgs) {
+            let result = recognitionEventArgs.result;
+            statusDiv.innerHTML += `(recognizing) Reason: ${SpeechSDK.ResultReason[result.reason]}`
+                + ` Text: ${result.text}\r\n`;
+            // Update the hypothesis line in the phrase/result view (only have one)
+            phraseDiv.innerHTML = phraseDiv.innerHTML.replace(/(.*)(^|[\r\n]+).*\[\.\.\.\][\r\n]+/, '$1$2')
+                + `${result.text} [...]\r\n`;
+            phraseDiv.scrollTop = phraseDiv.scrollHeight;
+        }
+
+        function onRecognized(sender, recognitionEventArgs) {
+            let result = recognitionEventArgs.result;
+            onRecognizedResult(recognitionEventArgs.result);
+        }
+
+        function onRecognizedResult(result) {
+            phraseDiv.scrollTop = phraseDiv.scrollHeight;
+
+            statusDiv.innerHTML += `(recognized)  Reason: ${SpeechSDK.ResultReason[result.reason]}`;
+            phraseDiv.innerHTML = '';
+
+            switch (result.reason) {
+                case SpeechSDK.ResultReason.NoMatch:
+                    let noMatchDetail = SpeechSDK.NoMatchDetails.fromResult(result);
+                    statusDiv.innerHTML += ` NoMatchReason: ${SpeechSDK.NoMatchReason[noMatchDetail.reason]}\r\n`;
+                    break;
+                case SpeechSDK.ResultReason.Canceled:
+                    let cancelDetails = SpeechSDK.CancellationDetails.fromResult(result);
+                    statusDiv.innerHTML += ` CancellationReason: ${SpeechSDK.CancellationReason[cancelDetails.reason]}`;
+                        + (cancelDetails.reason === SpeechSDK.CancellationReason.Error 
+                            ? `: ${cancelDetails.errorDetails}` : ``)
+                        + `\r\n`;
+                    break;
+                case SpeechSDK.ResultReason.RecognizedSpeech:
+                case SpeechSDK.ResultReason.RecognizedIntent:
+                    statusDiv.innerHTML += `\r\n`;
+
+                    phraseDiv.innerHTML += `${result.text}\r\n`;
+
+                    let intentJson = result.properties
+                        .getProperty(SpeechSDK.PropertyId.LanguageUnderstandingServiceResponse_JsonResult);
+                    if (intentJson) {
+                        phraseDiv.innerHTML += `${intentJson}\r\n`;
+                    }
+
+                    break;
+            }
+        }
+
+        function onSessionStarted(sender, sessionEventArgs) {
+            statusDiv.innerHTML += `(sessionStarted) SessionId: ${sessionEventArgs.sessionId}\r\n`;
+
+
+            scenarioStartButton.disabled = true;
+            scenarioStopButton.disabled = false;
+        }
+
+        function onSessionStopped(sender, sessionEventArgs) {
+            statusDiv.innerHTML += `(sessionStopped) SessionId: ${sessionEventArgs.sessionId}\r\n`;
+
+            scenarioStartButton.disabled = false;
+            scenarioStopButton.disabled = true;
+        }
+
+        function onCanceled (sender, cancellationEventArgs) {
+            window.console.log(e);
+
+            statusDiv.innerHTML += "(cancel) Reason: " + SpeechSDK.CancellationReason[e.reason];
+            if (e.reason === SpeechSDK.CancellationReason.Error) {
+                statusDiv.innerHTML += ": " + e.errorDetails;
+            }
+            statusDiv.innerHTML += "\r\n";
+        }
+
+        function applyCommonConfigurationTo(recognizer) {
+            // The 'recognizing' event signals that an intermediate recognition result is received.
+            // Intermediate results arrive while audio is being processed and represent the current "best guess" about
+            // what's been spoken so far.
+            recognizer.recognizing = onRecognizing;
+
+            // The 'recognized' event signals that a finalized recognition result has been received. These results are
+            // formed across complete utterance audio (with either silence or eof at the end) and will include
+            // punctuation, capitalization, and potentially other extra details.
+            // 
+            // * In the case of continuous scenarios, these final results will be generated after each segment of audio
+            //   with sufficient silence at the end.
+            // * In the case of intent scenarios, only these final results will contain intent JSON data.
+            // * Single-shot scenarios can also use a continuation on recognizeOnceAsync calls to handle this without
+            //   event registration.
+            recognizer.recognized = onRecognized;
+
+            // The 'canceled' event signals that the service has stopped processing speech.
+            // https://docs.microsoft.com/javascript/api/microsoft-cognitiveservices-speech-sdk/speechrecognitioncanceledeventargs?view=azure-node-latest
+            // This can happen for two broad classes of reasons:
+            // 1. An error was encountered.
+            //    In this case, the .errorDetails property will contain a textual representation of the error.
+            // 2. No additional audio is available.
+            //    This is caused by the input stream being closed or reaching the end of an audio file.
+            recognizer.canceled = onCanceled;
+
+            // The 'sessionStarted' event signals that audio has begun flowing and an interaction with the service has
+            // started.
+            reco.sessionStarted = onSessionStarted;
+
+            // The 'sessionStopped' event signals that the current interaction with the speech service has ended and
+            // audio has stopped flowing.
+            reco.sessionStopped = onSessionStopped;
+        }
+
+        function doRecognizeOnceAsync() {
+            resetUiForScenarioStart();
+
+            let audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+
+            let speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(authorizationToken, authorizationRegion);
+            speechConfig.speechRecognitionLanguage = 'en-US';
+
+            
+            if (!audioConfig || !speechConfig) return;
+
+            // Create the SpeechRecognizer and set up common event handlers and PhraseList data
+            reco = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+            applyCommonConfigurationTo(reco);
+
+            // Note: in this scenario sample, the 'recognized' event is not being set to instead demonstrate
+            // continuation on the 'recognizeOnceAsync' call. 'recognized' can be set in much the same way as
+            // 'recognizing' if an event-driven approach is preferable.
+            reco.recognized = undefined;
+
+            // Note: this scenario sample demonstrates result handling via continuation on the recognizeOnceAsync call.
+            // The 'recognized' event handler can be used in a similar fashion.
+            reco.recognizeOnceAsync(
+                function (successfulResult) {
+                    onRecognizedResult(successfulResult);
+                },
+                function (err) {
+                    window.console.log(err);
+                    phraseDiv.innerHTML += "ERROR: " + err;
+                });
+        }
+
+    </script>
+</body>
+
+</html>

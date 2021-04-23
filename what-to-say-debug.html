@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>What do you want me to say?</title>
+  <meta charset="utf-8" />
+  
+</head>
+<body>
+
+  <div id="content" style="display:none">
+
+    <h1>Synthesis</h1>
+    <table>
+      <tr>
+        <td align="right"><label for="synthesisText">Text</label></td>
+        <td>
+          <textarea id="synthesisText" style="display: inline-block;width:500px;height:100px"
+                 placeholder="Input text or ssml for synthesis."></textarea>
+        </td>
+      </tr>
+      <tr>
+        <td></td>
+        <td>
+          <button id="startSynthesisAsyncButton">Start synthesis</button>
+        </td>
+      </tr>
+      <tr>
+        <td align="right" valign="top"><label for="resultsDiv">Results</label></td>
+        <td><textarea id="resultsDiv" readonly style="display: inline-block;width:500px;height:50px"></textarea></td>
+      </tr>
+      <tr>
+        <td align="right" valign="top"><label for="eventsDiv">Events</label></td>
+        <td><textarea id="eventsDiv" readonly style="display: inline-block;width:500px;height:200px"></textarea></td>
+      </tr>
+    </table>
+
+    <h1>Recognition</h1>
+    <table>
+      <tr>
+          <td align="right"><b></b></td>
+          <td>
+              <button id="scenarioStartButton">Start</button>
+              <button id="scenarioStopButton">Stop</button>
+          </td>
+      </tr>
+      <tr>
+          <td align="right">Results:</td>
+          <td align="left">
+              <textarea id="phraseDiv" style="display: inline-block;width:500px;height:200px"></textarea>
+          </td>
+      </tr>
+      <tr>
+          <td align="right">Events:</td>
+          <td align="left">
+              <textarea id="statusDiv"
+                  style="display: inline-block;width:500px;height:200px;overflow: scroll;white-space: nowrap;">
+              </textarea>
+          </td>
+      </tr>
+  </table>
+  </div>
+
+  <!-- Speech SDK reference sdk. -->
+  <script src="https://aka.ms/csspeech/jsbrowserpackageraw"></script>
+
+  <!-- Speech SDK Authorization token -->
+  <script>
+  // Note: Replace the URL with a valid endpoint to retrieve
+  //       authorization tokens for your subscription.
+  // let authorizationEndpoint = "token.php";
+  let authorizationEndpoint = "http://files.lauren-mccarthy.com/what-say/token.php";
+
+  function RequestAuthorizationToken() {
+    if (authorizationEndpoint) {
+      let a = new XMLHttpRequest();
+      a.open("GET", authorizationEndpoint);
+      a.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+      a.send("");
+      a.onload = function() {
+          let token = JSON.parse(atob(this.responseText.split(".")[1]));
+          authorizationRegion = token.region;
+          authorizationToken = this.responseText;
+          console.log("Got an authorization token: " + token);
+          updateVoiceList();
+          updateInput();
+      }
+    }
+  }
+  </script>
+
+  <!-- Speech SDK USAGE -->
+  <script>
+    let authorizationToken, authorizationRegion;
+    let voiceOption;
+    let SpeechSDK;
+    let synthesisText;
+    let synthesizer;
+    let player;
+    let wordBoundaryList = [];
+    let asking = true;
+    
+    // On document load resolve the Speech SDK dependency
+    function Initialize(onComplete) {
+      if (!!window.SpeechSDK) {
+        document.getElementById('content').style.display = 'block';
+        onComplete(window.SpeechSDK);
+      }
+    }
+  </script>
+
+ <!-- SPEECH SYNTHESIS -->
+  <script>
+    let resultsDiv, eventsDiv;
+    let startSynthesisAsyncButton;
+
+    function updateVoiceList() {
+      let request = new XMLHttpRequest();
+      request.open('GET',
+              'https://westus.tts.speech.microsoft.com/cognitiveservices/voices/list', true);
+      if (authorizationToken) {
+        request.setRequestHeader("Authorization", "Bearer " + authorizationToken);
+      }
+
+      request.onload = function() {
+        if (request.status >= 200 && request.status < 400) {
+          const response = this.response;
+          const neuralSupport = (response.indexOf("AriaNeural") > 0);
+          const defaultVoice = neuralSupport ? "AriaNeural" : "AriaRUS";
+          let selectId;
+          const data = JSON.parse(response);
+          console.log(data);
+          voiceOption = data[58].Name;
+        } else {
+          window.console.log(this);
+          eventsDiv.innerHTML += "cannot get voice list, code: " + this.status + " detail: " + this.statusText + "\r\n";
+        }
+        console.log('synthe')
+        synthesizeSpeech("What do you want me to say?");
+        asking = true;
+
+      };
+
+      request.send()
+    }
+
+
+    function synthesizeSpeech(synthesisText) {
+      resultsDiv.innerHTML = "";
+      eventsDiv.innerHTML = "";
+      wordBoundaryList = [];
+
+      let speechConfig;
+      if (authorizationToken) {
+        speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(authorizationToken, authorizationRegion);
+      }
+
+      speechConfig.speechSynthesisVoiceName = voiceOption;
+      speechConfig.speechSynthesisOutputFormat = 'Audio24Khz48KBitRateMonoMp3';
+
+      player = new SpeechSDK.SpeakerAudioDestination();
+      player.onAudioEnd = function (_) {
+        window.console.log("playback finished");
+        eventsDiv.innerHTML += "playback finished" + "\r\n";
+        wordBoundaryList = [];
+        if (asking) {
+          doRecognizeOnceAsync();
+          asking = false;
+        } else {
+          synthesizeSpeech("What do you want me to say?");
+          asking = true;
+        }
+      };
+
+      let audioConfig  = SpeechSDK.AudioConfig.fromSpeakerOutput(player);
+
+      synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
+
+      // The event synthesizing signals that a synthesized audio chunk is received.
+      // You will receive one or more synthesizing events as a speech phrase is synthesized.
+      // You can use this callback to streaming receive the synthesized audio.
+      synthesizer.synthesizing = function (s, e) {
+        window.console.log(e);
+        eventsDiv.innerHTML += "(synthesizing) Reason: " + SpeechSDK.ResultReason[e.result.reason] +
+                "Audio chunk length: " + e.result.audioData.byteLength + "\r\n";
+      };
+
+      // The synthesis started event signals that the synthesis is started.
+      synthesizer.synthesisStarted = function (s, e) {
+        window.console.log(e);
+        eventsDiv.innerHTML += "(synthesis started)" + "\r\n";
+      };
+
+      // The event synthesis completed signals that the synthesis is completed.
+      synthesizer.synthesisCompleted = function (s, e) {
+        console.log(e);
+        eventsDiv.innerHTML += "(synthesized)  Reason: " + SpeechSDK.ResultReason[e.result.reason] +
+                " Audio length: " + e.result.audioData.byteLength + "\r\n";
+      };
+
+      // The event signals that the service has stopped processing speech.
+      // This can happen when an error is encountered.
+      synthesizer.SynthesisCanceled = function (s, e) {
+        const cancellationDetails = SpeechSDK.CancellationDetails.fromResult(e.result);
+        let str = "(cancel) Reason: " + SpeechSDK.CancellationReason[cancellationDetails.reason];
+        if (cancellationDetails.reason === SpeechSDK.CancellationReason.Error) {
+          str += ": " + e.result.errorDetails;
+        }
+        window.console.log(e);
+        eventsDiv.innerHTML += str + "\r\n";
+      };
+
+      // This event signals that word boundary is received. This indicates the audio boundary of each word.
+      // The unit of e.audioOffset is tick (1 tick = 100 nanoseconds), divide by 10,000 to convert to milliseconds.
+      synthesizer.wordBoundary = function (s, e) {
+        window.console.log(e);
+        eventsDiv.innerHTML += "(WordBoundary), Text: " + e.text + ", Audio offset: " + e.audioOffset / 10000 + "ms." + "\r\n";
+        wordBoundaryList.push(e);
+      };
+
+      const complete_cb = function (result) {
+        if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
+          resultsDiv.innerHTML += "synthesis finished";
+        } else if (result.reason === SpeechSDK.ResultReason.Canceled) {
+          resultsDiv.innerHTML += "synthesis failed. Error detail: " + result.errorDetails;
+        }
+        window.console.log(result);
+        synthesizer.close();
+        synthesizer = undefined;
+      };
+      const err_cb = function (err) {
+        phraseDiv.innerHTML += err;
+        window.console.log(err);
+        synthesizer.close();
+        synthesizer = undefined;
+      };
+      synthesizer.speakTextAsync(synthesisText,
+              complete_cb,
+              err_cb);
+    };
+</script>
+
+ <!-- SPEECH RECOGNITION -->
+ <script>
+  let phraseDiv, statusDiv;
+  let recognizer;
+  let scenarioStartButton, scenarioStopButton;
+  let reco;
+
+
+  let soundContext = undefined;
+  try {
+      let AudioContext = window.AudioContext // our preferred impl
+          || window.webkitAudioContext       // fallback, mostly when on Safari
+          || false;                          // could not find.
+
+      if (AudioContext) {
+          soundContext = new AudioContext();
+      } else {
+          alert("Audio context not supported");
+      }
+  } catch (e) {
+      window.console.log("no sound context found, no audio output. " + e);
+  }
+
+  function updateInput() {
+    const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+    const speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(authorizationToken, authorizationRegion);
+    speechConfig.speechRecognitionLanguage = 'en-US';
+
+    // Create the SpeechRecognizer and set up common event handlers and PhraseList data
+    reco = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+    applyCommonConfigurationTo(reco);
+
+    // Note: in this scenario sample, the 'recognized' event is not being set to instead demonstrate
+    // continuation on the 'recognizeOnceAsync' call. 'recognized' can be set in much the same way as
+    // 'recognizing' if an event-driven approach is preferable.
+    reco.recognized = undefined;
+
+  }
+
+  function resetUiForScenarioStart() {
+      phraseDiv.innerHTML = "";
+      statusDiv.innerHTML = "";
+  }
+
+  function onRecognizing(sender, recognitionEventArgs) {
+      let result = recognitionEventArgs.result;
+      statusDiv.innerHTML += `(recognizing) Reason: ${SpeechSDK.ResultReason[result.reason]}`
+          + ` Text: ${result.text}\r\n`;
+      // Update the hypothesis line in the phrase/result view (only have one)
+      phraseDiv.innerHTML = phraseDiv.innerHTML.replace(/(.*)(^|[\r\n]+).*\[\.\.\.\][\r\n]+/, '$1$2')
+          + `${result.text} [...]\r\n`;
+      phraseDiv.scrollTop = phraseDiv.scrollHeight;
+  }
+
+  function onRecognized(sender, recognitionEventArgs) {
+      let result = recognitionEventArgs.result;
+      onRecognizedResult(recognitionEventArgs.result);
+  }
+
+  function onRecognizedResult(result) {
+      phraseDiv.scrollTop = phraseDiv.scrollHeight;
+
+      statusDiv.innerHTML += `(recognized)  Reason: ${SpeechSDK.ResultReason[result.reason]}`;
+      phraseDiv.innerHTML = '';
+
+      switch (result.reason) {
+          case SpeechSDK.ResultReason.NoMatch:
+              let noMatchDetail = SpeechSDK.NoMatchDetails.fromResult(result);
+              statusDiv.innerHTML += ` NoMatchReason: ${SpeechSDK.NoMatchReason[noMatchDetail.reason]}\r\n`;
+              break;
+          case SpeechSDK.ResultReason.Canceled:
+              let cancelDetails = SpeechSDK.CancellationDetails.fromResult(result);
+              statusDiv.innerHTML += ` CancellationReason: ${SpeechSDK.CancellationReason[cancelDetails.reason]}`;
+                  + (cancelDetails.reason === SpeechSDK.CancellationReason.Error 
+                      ? `: ${cancelDetails.errorDetails}` : ``)
+                  + `\r\n`;
+              break;
+          case SpeechSDK.ResultReason.RecognizedSpeech:
+          case SpeechSDK.ResultReason.RecognizedIntent:
+              statusDiv.innerHTML += `\r\n`;
+
+              phraseDiv.innerHTML += `${result.text}\r\n`;
+
+              let intentJson = result.properties
+                  .getProperty(SpeechSDK.PropertyId.LanguageUnderstandingServiceResponse_JsonResult);
+              if (intentJson) {
+                  phraseDiv.innerHTML += `${intentJson}\r\n`;
+              }
+              synthesizeSpeech(result.text);
+              break;
+      }
+  }
+
+  function onSessionStarted(sender, sessionEventArgs) {
+      statusDiv.innerHTML += `(sessionStarted) SessionId: ${sessionEventArgs.sessionId}\r\n`;
+  }
+
+  function onSessionStopped(sender, sessionEventArgs) {
+      statusDiv.innerHTML += `(sessionStopped) SessionId: ${sessionEventArgs.sessionId}\r\n`;
+  }
+
+  function onCanceled (sender, cancellationEventArgs) {
+      window.console.log(e);
+
+      statusDiv.innerHTML += "(cancel) Reason: " + SpeechSDK.CancellationReason[e.reason];
+      if (e.reason === SpeechSDK.CancellationReason.Error) {
+          statusDiv.innerHTML += ": " + e.errorDetails;
+      }
+      statusDiv.innerHTML += "\r\n";
+  }
+
+  function applyCommonConfigurationTo(recognizer) {
+      // The 'recognizing' event signals that an intermediate recognition result is received.
+      // Intermediate results arrive while audio is being processed and represent the current "best guess" about
+      // what's been spoken so far.
+      recognizer.recognizing = onRecognizing;
+
+      // The 'recognized' event signals that a finalized recognition result has been received. These results are
+      // formed across complete utterance audio (with either silence or eof at the end) and will include
+      // punctuation, capitalization, and potentially other extra details.
+      // 
+      // * In the case of continuous scenarios, these final results will be generated after each segment of audio
+      //   with sufficient silence at the end.
+      // * In the case of intent scenarios, only these final results will contain intent JSON data.
+      // * Single-shot scenarios can also use a continuation on recognizeOnceAsync calls to handle this without
+      //   event registration.
+      recognizer.recognized = onRecognized;
+
+      // The 'canceled' event signals that the service has stopped processing speech.
+      // https://docs.microsoft.com/javascript/api/microsoft-cognitiveservices-speech-sdk/speechrecognitioncanceledeventargs?view=azure-node-latest
+      // This can happen for two broad classes of reasons:
+      // 1. An error was encountered.
+      //    In this case, the .errorDetails property will contain a textual representation of the error.
+      // 2. No additional audio is available.
+      //    This is caused by the input stream being closed or reaching the end of an audio file.
+      recognizer.canceled = onCanceled;
+
+      // The 'sessionStarted' event signals that audio has begun flowing and an interaction with the service has
+      // started.
+      reco.sessionStarted = onSessionStarted;
+
+      // The 'sessionStopped' event signals that the current interaction with the speech service has ended and
+      // audio has stopped flowing.
+      reco.sessionStopped = onSessionStopped;
+  }
+
+  function doRecognizeOnceAsync() {
+    resetUiForScenarioStart();
+    
+    // Note: this scenario sample demonstrates result handling via continuation on the recognizeOnceAsync call.
+    // The 'recognized' event handler can be used in a similar fashion.
+    reco.recognizeOnceAsync(
+        function (successfulResult) {
+            onRecognizedResult(successfulResult);
+        },
+        function (err) {
+            window.console.log(err);
+            phraseDiv.innerHTML += "ERROR: " + err;
+        });
+  }
+
+</script>
+<script>
+
+
+    document.addEventListener("DOMContentLoaded", function () {
+
+      // Synthesis
+      startSynthesisAsyncButton = document.getElementById("startSynthesisAsyncButton");
+      startSynthesisAsyncButton.addEventListener('click', synthesizeSpeech);
+
+      resultsDiv = document.getElementById("resultsDiv");
+      eventsDiv = document.getElementById("eventsDiv");
+
+      // Recognition
+      scenarioStartButton = document.getElementById('scenarioStartButton');
+      scenarioStopButton = document.getElementById('scenarioStopButton');
+
+      phraseDiv = document.getElementById("phraseDiv");
+      statusDiv = document.getElementById("statusDiv");
+
+      scenarioStartButton.addEventListener("click", doRecognizeOnceAsync);
+      scenarioStopButton.addEventListener("click", function() {
+        reco.close();
+      });
+
+      Initialize(function (speechSdk) {
+        SpeechSDK = speechSdk;
+
+        RequestAuthorizationToken();
+      });
+    });
+  </script>
+</body>
+</html>

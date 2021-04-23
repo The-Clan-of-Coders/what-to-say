@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>What do you want me to say?</title>
+  <meta charset="utf-8" />
+  <script src="js/p5.min.js"></script>
+  <script src="js/speech.sdk.bundle.js"></script>
+</head>
+<body>
+  <script src="js/sketch.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: none;
+    }
+    .border {
+      height: 80vh;
+      width: calc(100vw - 20vh);
+      position: absolute;
+      top: 10vh;
+      left: 10vh;
+      z-index: 5;
+      box-sizing: border-box;
+      pointer-events: none;
+    }
+    .container {
+      height: 100vh;
+      width: 100vw;
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: flex;
+      justify-content: center; /* align horizontal */
+      align-items: center; /* align vertical */
+    }
+    span {
+      font-size: 8vw;
+      text-align: center;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: normal;
+      width: 70%;
+      font-family: 'Hershey';
+      font-style: italic;
+    }
+    #phrase {
+      background: #b94444;
+    }
+    #phrase span {
+      color: red;
+    }
+    #phrase .border {
+      border: 0.75vw solid red;
+    }
+    #intro {
+      background: #e9e9e9;
+      cursor: pointer;
+    }
+    #intro span {
+      color: white;
+    }
+    #intro .border {
+      border: 0.75vw solid white;
+    }
+
+    @font-face {
+      font-family: 'Hershey';
+      src: url('fonts/Hershey-Noailles-Times-Simplex-Regular.eot'); /* IE9 Compat Modes */
+      src: url('fonts/Hershey-Noailles-Times-Simplex-Regular.eot?#iefix') format('embedded-opentype'), /* IE6-IE8 */
+          url('fonts/Hershey-Noailles-Times-Simplex-Regular.woff') format('woff'), /* Pretty Modern Browsers */
+          url('fonts/Hershey-Noailles-Times-Simplex-Regular.ttf')  format('truetype'), /* Safari, Android, iOS */
+          url('fonts/Hershey-Noailles-Times-Simplex-Regular.svg#svgFontName') format('svg'); /* Legacy iOS */
+    }
+    @font-face {
+      font-family: 'Hershey';
+      font-style: italic;
+      src: url('fonts/Hershey-Noailles-Times-Duplex-Italic-Regular.eot'); /* IE9 Compat Modes */
+      src: url('fonts/Hershey-Noailles-Times-Duplex-Italic-Regular.eot?#iefix') format('embedded-opentype'), /* IE6-IE8 */
+          url('fonts/Hershey-Noailles-Times-Duplex-Italic-Regular.woff') format('woff'), /* Pretty Modern Browsers */
+          url('fonts/Hershey-Noailles-Times-Duplex-Italic-Regular.ttf')  format('truetype'), /* Safari, Android, iOS */
+          url('fonts/Hershey-Noailles-Times-Duplex-Italic-Regular.svg#svgFontName') format('svg'); /* Legacy iOS */
+    }
+  </style>
+
+  
+  <div id='intro' class='container'>
+    <div class='border'></div>
+    <span>The artist’s voice can be controlled.</span>
+  </div>
+  <div id='phrase' class='container'>
+    <div class='border'></div>
+    <span id='phrase-span'></span>
+  </div>
+</body>
+</html>
